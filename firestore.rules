@@ -1,0 +1,180 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------------------------------------------------
+    function signedIn() { return request.auth != null; }
+
+    // Token email must end with the campus suffix (edit here if CAMPUS_EMAIL_DOMAINS changes)
+    function campusEmail() {
+      return signedIn()
+        && request.auth.token.email != null
+        && request.auth.token.email.lower().matches('.*\\.cst@rub\\.edu\\.bt');
+    }
+    // Campus email AND the verification link has been clicked
+    function verified() { return campusEmail() && request.auth.token.email_verified == true; }
+
+    function userDoc(uid) { return get(/databases/$(database)/documents/users/$(uid)).data; }
+    function isAdmin() { return verified() && userDoc(request.auth.uid).get('role', 'user') == 'admin'; }
+
+    // true if only the listed top-level keys differ between old and new document
+    function changedOnly(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+    function isSellerOf(listingId) {
+      return get(/databases/$(database)/documents/listings/$(listingId)).data.sellerUid == request.auth.uid;
+    }
+
+    // ---------- users ------------------------------------------------------
+    match /users/{uid} {
+      // verified users can read profiles; a brand-new (unverified) user may read their own
+      allow read: if verified() || (campusEmail() && request.auth.uid == uid);
+
+      allow create: if campusEmail()
+        && request.auth.uid == uid
+        && request.resource.data.role == 'user'
+        && request.resource.data.trusted == false
+        && request.resource.data.completedSales == 0
+        && request.resource.data.upheldReports == 0
+        && request.resource.data.ratingCount == 0;
+
+      allow update: if
+        // owner: edit own profile but never role / badge / ratings / reports; completedSales may only go up by 1
+        (verified() && request.auth.uid == uid
+          && request.resource.data.get('role', 'user') == resource.data.get('role', 'user')
+          && request.resource.data.get('trusted', false) == resource.data.get('trusted', false)
+          && request.resource.data.get('upheldReports', 0) == resource.data.get('upheldReports', 0)
+          && request.resource.data.get('ratingAvg', 0) == resource.data.get('ratingAvg', 0)
+          && request.resource.data.get('ratingCount', 0) == resource.data.get('ratingCount', 0)
+          && request.resource.data.get('suspended', false) == resource.data.get('suspended', false)
+          && request.resource.data.get('trustedManual', false) == resource.data.get('trustedManual', false)
+          && request.resource.data.get('completedSales', 0) in [resource.data.get('completedSales', 0), resource.data.get('completedSales', 0) + 1])
+        // other verified users: only the rating aggregates + badge (client-side stats, see README)
+        || (verified() && request.auth.uid != uid && changedOnly(['ratingAvg', 'ratingCount', 'trusted']))
+        || isAdmin();
+
+      allow delete: if false;
+
+      // private lists
+      match /saved/{listingId} { allow read, write: if verified() && request.auth.uid == uid; }
+      match /likes/{listingId} { allow read, write: if verified() && request.auth.uid == uid; }
+    }
+
+    // ---------- listings ---------------------------------------------------
+    match /listings/{listingId} {
+      allow read: if verified();
+      allow create: if verified()
+        && request.resource.data.sellerUid == request.auth.uid
+        && request.resource.data.removed == false;
+      allow update: if
+        (verified() && resource.data.sellerUid == request.auth.uid
+          && request.resource.data.sellerUid == resource.data.sellerUid)
+        // everyone: like / comment counters and rating aggregates only
+        || (verified() && changedOnly(['likeCount', 'commentCount', 'ratingAvg', 'ratingCount', 'sellerRatingAvg', 'sellerTrusted']))
+        || isAdmin();
+      allow delete: if verified() && (resource.data.sellerUid == request.auth.uid || isAdmin());
+
+      match /comments/{commentId} {
+        allow read: if verified();
+        allow create: if verified() && request.resource.data.authorUid == request.auth.uid;
+        allow delete: if verified() && (resource.data.authorUid == request.auth.uid || isSellerOf(listingId) || isAdmin());
+      }
+      // who saved this listing (used to send price-drop / sold alerts)
+      match /savedBy/{uid} {
+        allow read: if verified() && (request.auth.uid == uid || isSellerOf(listingId));
+        allow create, delete: if verified() && request.auth.uid == uid;
+      }
+    }
+
+    // full-size photos (kept out of the feed query)
+    match /listingImages/{listingId} {
+      allow read: if verified();
+      allow create, update: if verified() && getAfter(/databases/$(database)/documents/listings/$(listingId)).data.sellerUid == request.auth.uid;
+      allow delete: if verified() && (get(/databases/$(database)/documents/listings/$(listingId)).data.sellerUid == request.auth.uid || isAdmin());
+    }
+
+    // ---------- ratings ----------------------------------------------------
+    match /ratings/{orderId} {
+      allow read: if verified();
+      // only the buyer of a COMPLETED order can rate it, once (document id = order id)
+      allow create: if verified()
+        && request.resource.data.buyerUid == request.auth.uid
+        && request.resource.data.stars is int
+        && request.resource.data.stars >= 1 && request.resource.data.stars <= 5
+        && get(/databases/$(database)/documents/orders/$(orderId)).data.buyerUid == request.auth.uid
+        && get(/databases/$(database)/documents/orders/$(orderId)).data.status == 'completed';
+      allow update, delete: if isAdmin();
+    }
+
+    // ---------- orders -----------------------------------------------------
+    match /orders/{orderId} {
+      allow read: if verified() && (resource.data.buyerUid == request.auth.uid || resource.data.sellerUid == request.auth.uid || isAdmin());
+      allow create: if verified()
+        && request.resource.data.buyerUid == request.auth.uid
+        && request.resource.data.sellerUid != request.auth.uid
+        && request.resource.data.status == 'requested';
+      allow update: if verified()
+        && request.resource.data.buyerUid == resource.data.buyerUid
+        && request.resource.data.sellerUid == resource.data.sellerUid
+        && (
+          // seller decides the order
+          (resource.data.sellerUid == request.auth.uid
+            && request.resource.data.status in ['accepted', 'declined', 'cancelled', 'completed'])
+          // buyer can cancel while still requested, or mark it rated
+          || (resource.data.buyerUid == request.auth.uid
+            && ((resource.data.status == 'requested' && request.resource.data.status == 'cancelled')
+                || changedOnly(['rated', 'updatedAt'])))
+        );
+    }
+
+    // ---------- chats ------------------------------------------------------
+    function messageAllowed(chatId) {
+      let chat = get(/databases/$(database)/documents/chats/$(chatId)).data;
+      let other = chat.buyerUid == request.auth.uid ? chat.sellerUid : chat.buyerUid;
+      return !(request.auth.uid in userDoc(other).get('blockedUids', []))
+        && !(other in userDoc(request.auth.uid).get('blockedUids', []));
+    }
+
+    match /chats/{chatId} {
+      allow get: if verified() && (resource == null || request.auth.uid in resource.data.participants);
+      allow list: if verified() && request.auth.uid in resource.data.participants;
+      // only a BUYER can start a chat, never with themselves, and the seller must really own the listing
+      allow create: if verified()
+        && request.resource.data.buyerUid == request.auth.uid
+        && request.resource.data.sellerUid != request.auth.uid
+        && request.resource.data.participants == [request.resource.data.buyerUid, request.resource.data.sellerUid]
+        && get(/databases/$(database)/documents/listings/$(request.resource.data.listingId)).data.sellerUid == request.resource.data.sellerUid;
+      allow update: if verified() && request.auth.uid in resource.data.participants
+        && changedOnly(['lastMessage', 'lastMessageAt', 'unread']);
+
+      match /messages/{messageId} {
+        allow read: if verified() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+        allow create: if verified()
+          && request.resource.data.senderUid == request.auth.uid
+          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants
+          && messageAllowed(chatId);
+        // the OTHER person can accept / decline a meetup suggestion
+        allow update: if verified()
+          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants
+          && request.auth.uid != resource.data.senderUid
+          && changedOnly(['meetup']);
+      }
+    }
+
+    // ---------- notifications ----------------------------------------------
+    match /notifications/{id} {
+      allow read, update, delete: if verified() && resource.data.toUid == request.auth.uid;
+      allow create: if verified()
+        && request.resource.data.fromUid == request.auth.uid
+        && request.resource.data.toUid != request.auth.uid;
+    }
+
+    // ---------- reports (admins review them) -------------------------------
+    match /reports/{id} {
+      allow create: if verified() && request.resource.data.reporterUid == request.auth.uid;
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /{document=**} { allow read, write: if false; }
+  }
+}
