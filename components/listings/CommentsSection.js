@@ -1,15 +1,15 @@
-import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { AppButton, AppInput, MenuSheet } from '@/components/common';
 import { fontSize, radius } from '@/constants/theme';
-import { useStyles } from '@/hooks/useStyles';
 import { useAuth } from '@/hooks/useAuth';
 import { useData } from '@/hooks/useData';
-import { addComment, deleteComment, subscribeComments } from '@/services/listingService';
-import { showError } from '@/store/toastStore';
+import { useStyles } from '@/hooks/useStyles';
 import { confirmDialog } from '@/lib/dialogs';
 import { errorMessage, timeAgo } from '@/lib/utils';
-import { AppButton, AppInput, MenuSheet } from '@/components/common';
+import { addComment, deleteComment, subscribeComments } from '@/services/listingService';
+import { showError } from '@/store/toastStore';
+import { Ionicons } from '@expo/vector-icons';
+import { useEffect, useState } from 'react';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import ReportSheet from './ReportSheet';
 
 export default function CommentsSection({ listing }) {
@@ -21,13 +21,14 @@ export default function CommentsSection({ listing }) {
   const [busy, setBusy] = useState(false);
   const [menuFor, setMenuFor] = useState(null);
   const [reportFor, setReportFor] = useState(null);
+  const [loadError, setLoadError] = useState(null);
 
-  useEffect(() => subscribeComments(listing.id, setComments, () => {}), [listing.id]);
+  useEffect(() => subscribeComments(listing.id, (list) => { setComments(list); setLoadError(null); }, (e) => setLoadError(errorMessage(e, 'Could not load comments.'))), [listing.id]);
 
   const visible = comments.filter((c) => !hiddenUids.has(c.authorUid));
 
   const post = async () => {
-    if (text.trim().length < 1) return;
+    if (busy || text.trim().length < 1) return;
     setBusy(true);
     try { await addComment(listing, profile, text); setText(''); } catch (e) { showError(errorMessage(e)); } finally { setBusy(false); }
   };
@@ -54,11 +55,13 @@ export default function CommentsSection({ listing }) {
       <Text style={styles.h}>Comments & questions ({visible.length})</Text>
       <View style={styles.inputRow}>
         <View style={{ flex: 1 }}>
-          <AppInput value={text} onChangeText={setText} placeholder="Ask a question or leave a comment…" maxLength={300} />
+          <AppInput value={text} onChangeText={setText} placeholder="Ask a question or leave a comment…" maxLength={300}
+            returnKeyType="send" blurOnSubmit onSubmitEditing={post} />
         </View>
         <AppButton title="Post" small onPress={post} loading={busy} disabled={!text.trim()} style={{ marginBottom: 14, marginLeft: 8 }} />
       </View>
-      {visible.length === 0 ? <Text style={styles.empty}>No comments yet. Be the first to ask something.</Text> : null}
+      {loadError ? <Text style={[styles.empty, { color: colors.danger }]}>{loadError}</Text> : null}
+      {visible.length === 0 && !loadError ? <Text style={styles.empty}>No comments yet. Be the first to ask something.</Text> : null}
       {visible.map((c) => (
         <View key={c.id} style={styles.comment}>
           <View style={{ flex: 1 }}>

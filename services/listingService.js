@@ -1,9 +1,10 @@
-import {
-  addDoc, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, updateDoc, writeBatch,
-} from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { normalizeListing } from '@/lib/normalize';
 import { notify } from '@/services/notificationService';
+import {
+  collection,
+  doc, getDoc, getDocs, increment, onSnapshot, updateDoc, writeBatch
+} from 'firebase/firestore';
 
 const MAX_IMAGE_CHARS = 900000; // Firestore documents are limited to 1 MB
 
@@ -122,17 +123,27 @@ export async function toggleLike(profile, listing, currentlyLiked) {
 }
 
 export async function addComment(listing, profile, text) {
-  await addDoc(collection(db, 'listings', listing.id, 'comments'), {
-    listingId: listing.id, authorUid: profile.uid, authorName: profile.fullName, text: text.trim(), createdAt: Date.now(),
+  const clean = (text || '').trim();
+  if (!clean) throw new Error('Please type a comment first.');
+  if (!profile || !profile.uid) throw new Error('You are not signed in. Please sign in again.');
+  const ref = doc(collection(db, 'listings', listing.id, 'comments'));
+  // comment + counter are written together, so they can never get out of sync
+  const batch = writeBatch(db);
+  batch.set(ref, {
+    listingId: listing.id, authorUid: profile.uid, authorName: profile.fullName || 'Student',
+    text: clean.slice(0, 300), createdAt: Date.now(),
   });
-  await updateDoc(doc(db, 'listings', listing.id), { commentCount: increment(1) });
+  batch.update(doc(db, 'listings', listing.id), { commentCount: increment(1) });
+  await batch.commit();
   await notify({ toUid: listing.sellerUid, actor: actorOf(profile), type: 'comment', title: 'New comment',
-    body: `${profile.fullName}: ${text.trim().slice(0, 80)}`, listingId: listing.id });
+    body: `${profile.fullName}: ${clean.slice(0, 80)}`, listingId: listing.id });
 }
 
 export async function deleteComment(listingId, commentId) {
-  await deleteDoc(doc(db, 'listings', listingId, 'comments', commentId));
-  await updateDoc(doc(db, 'listings', listingId), { commentCount: increment(-1) });
+  const batch = writeBatch(db);
+  batch.delete(doc(db, 'listings', listingId, 'comments', commentId));
+  batch.update(doc(db, 'listings', listingId), { commentCount: increment(-1) });
+  await batch.commit();
 }
 
 export function subscribeComments(listingId, cb, onError) {

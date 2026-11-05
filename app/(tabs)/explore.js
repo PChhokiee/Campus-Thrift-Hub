@@ -1,15 +1,15 @@
-import React, { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { AppButton, Chip, CountBadge, EmptyState, ErrorBanner, LoadingView, Screen } from '@/components/common';
+import { Chip, CountBadge, EmptyState, ErrorBanner, LoadingView, Screen } from '@/components/common';
 import FilterSheet from '@/components/listings/FilterSheet';
 import ListingGrid from '@/components/listings/ListingGrid';
 import { CATEGORY_FILTERS, SORT_OPTIONS } from '@/constants/campus';
 import { fontSize, radius } from '@/constants/theme';
-import { useStyles } from '@/hooks/useStyles';
 import { useData } from '@/hooks/useData';
+import { useStyles } from '@/hooks/useStyles';
+import { countSheetFilters, filterAndSort, matchingCategories } from '@/lib/filters';
 import { useFilterStore } from '@/store/filterStore';
-import { countSheetFilters, filterAndSort } from '@/lib/filters';
+import { Ionicons } from '@expo/vector-icons';
+import { useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 export default function Explore() {
   const { styles, colors } = useStyles(makeStyles);
@@ -18,6 +18,7 @@ export default function Explore() {
   const [sheet, setSheet] = useState(false);
 
   const results = useMemo(() => filterAndSort(listings, filters, sort), [listings, filters, sort]);
+  const catMatches = useMemo(() => matchingCategories(filters.query), [filters.query]);
   const sheetCount = countSheetFilters(filters);
   const anyFilter = sheetCount > 0 || filters.query || filters.category !== 'All';
 
@@ -30,7 +31,7 @@ export default function Explore() {
             style={styles.input}
             value={filters.query}
             onChangeText={(t) => setFilters({ query: t })}
-            placeholder="Search title, description, category…"
+            placeholder="Search items or categories (e.g. books, shoes)…"
             placeholderTextColor={colors.muted}
             returnKeyType="search"
             autoCorrect={false}
@@ -46,6 +47,13 @@ export default function Explore() {
           {sheetCount ? <CountBadge count={sheetCount} style={styles.filterBadge} /> : null}
         </TouchableOpacity>
       </View>
+
+      {catMatches.length ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+          <Text style={styles.sortLabel}>In category:</Text>
+          {catMatches.map((c) => <Chip key={c} label={c} selected={filters.category === c} onPress={() => setFilters({ category: c, query: '' })} />)}
+        </ScrollView>
+      ) : null}
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
         {CATEGORY_FILTERS.map((c) => <Chip key={c} label={c} selected={filters.category === c} onPress={() => setFilters({ category: c })} />)}

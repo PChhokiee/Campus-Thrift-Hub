@@ -9,8 +9,18 @@ export const STATUS_LABELS = {
   sold: 'Sold',
 };
 
-// Campus areas used for the "location" field and filter.
-export const CAMPUS_LOCATIONS = ['On campus', 'Hostel', 'Library area', 'Academic block', 'Canteen area'];
+// Location used for the "location" field and filter.
+export const CAMPUS_LOCATIONS = ['College of Science and Technology, Phuentsholing'];
+
+// Words people may type that should find a category (search by category).
+export const CATEGORY_KEYWORDS = {
+  Books: ['book', 'textbook', 'novel', 'notes', 'guide', 'reference'],
+  Electronics: ['electronic', 'laptop', 'phone', 'mobile', 'charger', 'gadget', 'calculator', 'earphone', 'headphone'],
+  Furniture: ['table', 'chair', 'desk', 'bed', 'shelf', 'cupboard', 'mattress'],
+  Clothes: ['clothing', 'cloth', 'shirt', 'jacket', 'dress', 'jeans', 'gho', 'kira', 'uniform', 'hoodie'],
+  Shoes: ['shoe', 'sneaker', 'boot', 'sandal', 'footwear', 'slipper'],
+  Home: ['kitchen', 'household', 'appliance', 'cooker', 'bucket', 'utensil'],
+};
 
 export const REPORT_REASONS = [
   { key: 'spam', label: 'Spam or fake listing' },
@@ -21,16 +31,17 @@ export const REPORT_REASONS = [
   { key: 'other', label: 'Other' },
 ];
 
-// Safe meetup points. PLACEHOLDER coordinates near CST, Rinchending:
-// replace with the real, admin-approved spots before user testing.
+// Safe meetup points at CST, Rinchending (Phuentsholing).
+// NOTE: coordinates are approximate (campus centre is 26.8503, 89.3940).
+// Open Google Maps, long-press the exact spot and copy its latitude/longitude to fine-tune each point.
 export const MEETUP_POINTS = [
-  { id: 'library', name: 'Library entrance', description: 'Well-lit, busy during the day', latitude: 26.8645, longitude: 89.3925 },
-  { id: 'canteen', name: 'Canteen front', description: 'Public area, lots of students', latitude: 26.8641, longitude: 89.3931 },
-  { id: 'admin', name: 'Admin block lobby', description: 'Staff nearby, CCTV area', latitude: 26.8649, longitude: 89.3919 },
-  { id: 'gate', name: 'Main gate security post', description: 'Security guard present', latitude: 26.8653, longitude: 89.3912 },
-  { id: 'sports', name: 'Sports ground entrance', description: 'Open and visible', latitude: 26.8636, longitude: 89.3938 },
+  { id: 'library', name: 'Library entrance', description: 'Well-lit, busy during the day', latitude: 26.8506, longitude: 89.3937 },
+  { id: 'canteen', name: 'Canteen front', description: 'Public area, lots of students', latitude: 26.8500, longitude: 89.3944 },
+  { id: 'admin', name: 'Admin block lobby', description: 'Staff nearby, CCTV area', latitude: 26.8508, longitude: 89.3942 },
+  { id: 'gate', name: 'Main gate security post', description: 'Security guard present', latitude: 26.8499, longitude: 89.3934 },
+  { id: 'sports', name: 'Sports ground entrance', description: 'Open and visible', latitude: 26.8497, longitude: 89.3947 },
 ];
-export const MAP_CENTER = { latitude: 26.8645, longitude: 89.3925, latitudeDelta: 0.006, longitudeDelta: 0.006 };
+export const MAP_CENTER = { latitude: 26.8503, longitude: 89.3940, latitudeDelta: 0.006, longitudeDelta: 0.006 };
 
 export const SORT_OPTIONS = [
   { key: 'newest', label: 'Newest' },

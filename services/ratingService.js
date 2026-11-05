@@ -1,13 +1,16 @@
-import { collection, doc, getDoc, getDocs, query, setDoc, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { evaluateTrusted } from '@/lib/trust';
 import { notify } from '@/services/notificationService';
+import { collection, doc, getDoc, getDocs, query, setDoc, updateDoc, where, writeBatch } from 'firebase/firestore';
 
 const avgOf = (docs) => {
   if (!docs.length) return { avg: 0, count: 0 };
   const sum = docs.reduce((n, d) => n + (d.data().stars || 0), 0);
   return { avg: Math.round((sum / docs.length) * 100) / 100, count: docs.length };
 };
+
+/** One rating per person per listing: document id = listingId_userUid */
+export const ratingId = (listingId, uid) => `${listingId}_${uid}`;
 
 /** Recomputes seller + listing rating aggregates and the Trusted Seller flag (client-side, no Cloud Functions). */
 export async function syncSellerStats(sellerUid, listingId) {
@@ -37,16 +40,35 @@ export async function syncSellerStats(sellerUid, listingId) {
   return { trusted, ...s };
 }
 
-/** Buyer rates the item + seller after a completed order (one rating per order). */
-export async function submitRating({ order, stars, review, profile }) {
-  await setDoc(doc(db, 'ratings', order.id), {
-    orderId: order.id, listingId: order.listingId, listingTitle: order.listingTitle, sellerUid: order.sellerUid,
-    buyerUid: profile.uid, buyerName: profile.fullName, stars, review: (review || '').trim(), createdAt: Date.now(),
+/** My existing rating of a listing (or null). */
+export async function getMyRating(listingId, uid) {
+  const snap = await getDoc(doc(db, 'ratings', ratingId(listingId, uid)));
+  return snap.exists() ? snap.data() : null;
+}
+
+/**
+ * Any signed-in (verified) user can rate any listing that is not their own.
+ * Rating again simply updates the previous rating.
+ * listing = { id, title, sellerUid, sellerName }; order is optional (marks that order as rated).
+ */
+export async function submitRating({ listing, order, stars, review, profile }) {
+  if (!listing || !listing.sellerUid) throw new Error('This listing cannot be rated.');
+  if (listing.sellerUid === profile.uid) throw new Error("You can't rate your own listing.");
+  const previous = await getMyRating(listing.id, profile.uid);
+  await setDoc(doc(db, 'ratings', ratingId(listing.id, profile.uid)), {
+    listingId: listing.id, listingTitle: listing.title, sellerUid: listing.sellerUid,
+    buyerUid: profile.uid, buyerName: profile.fullName || 'Student', stars,
+    review: (review || '').trim(), orderId: order ? order.id : null,
+    createdAt: previous ? previous.createdAt : Date.now(), updatedAt: Date.now(),
   });
-  await updateDoc(doc(db, 'orders', order.id), { rated: true, updatedAt: Date.now() });
-  try { await syncSellerStats(order.sellerUid, order.listingId); } catch (e) { console.warn('[syncSellerStats]', e && e.message); }
-  await notify({ toUid: order.sellerUid, actor: { uid: profile.uid, name: profile.fullName }, type: 'rating', title: 'New rating',
-    body: `${profile.fullName} rated you ${stars}★ for "${order.listingTitle}".`, listingId: order.listingId, orderId: order.id });
+  if (order) {
+    try { await updateDoc(doc(db, 'orders', order.id), { rated: true, updatedAt: Date.now() }); } catch (e) { console.warn('[order rated]', e && e.message); }
+  }
+  try { await syncSellerStats(listing.sellerUid, listing.id); } catch (e) { console.warn('[syncSellerStats]', e && e.message); }
+  if (!previous) {
+    await notify({ toUid: listing.sellerUid, actor: { uid: profile.uid, name: profile.fullName }, type: 'rating', title: 'New rating',
+      body: `${profile.fullName} rated "${listing.title}" ${stars}★.`, listingId: listing.id, orderId: order ? order.id : undefined });
+  }
 }
 
 export async function listSellerRatings(sellerUid) {
